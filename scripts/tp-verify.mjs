@@ -40,9 +40,9 @@ const user = userRes.ok ? (await userRes.json()).user : null;
 
 console.log("Cookie works.");
 console.log(`  cookie file:  ${file} (${cookie.length} chars)`);
-console.log(`  athlete id:   ${tokenBody.athleteId}`);
 console.log(`  token ttl:    ${expiresMin} min (refreshed automatically)`);
 if (user) {
+  console.log(`  athlete id:   ${user.userId}`);
   console.log(`  account:      ${user.firstName} ${user.lastName}`);
   console.log(`  premium:      ${user.settings?.account?.isPremium === true}`);
 }
