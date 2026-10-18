@@ -1,3 +1,6 @@
+import fs from "fs";
+import os from "os";
+import path from "path";
 import axios from "axios";
 
 export interface TokenResponse {
@@ -25,6 +28,18 @@ export interface UserProfile {
 
 const BASE_URL = "https://tpapi.trainingpeaks.com";
 
+/**
+ * Where the session cookie lives on disk.
+ *
+ * A file rather than an environment variable, so the cookie can be replaced
+ * while the server is running: the next call re-reads it. An env-var-only
+ * cookie means every expiry needs an MCP config edit and a restart of the
+ * host app, which is fatal for unattended scheduled runs.
+ */
+export const COOKIE_FILE =
+  process.env.TP_COOKIE_FILE ??
+  path.join(os.homedir(), ".config", "trainingpeaks-mcp", "cookie");
+
 interface CachedToken {
   value: string;
   expiresAt: number;
@@ -38,16 +53,30 @@ export function clearTokenCache(): void {
   cachedAthleteId = null;
 }
 
-function getAuthCookie(): string {
-  const cookie = process.env.TP_AUTH_COOKIE;
-  if (!cookie) {
-    throw new Error(
-      "TP_AUTH_COOKIE environment variable is not set. " +
-        "Please extract the Production_tpAuth cookie from your browser's DevTools " +
-        "after logging into TrainingPeaks."
-    );
+function readCookieFile(): string | null {
+  try {
+    const raw = fs.readFileSync(COOKIE_FILE, "utf8").trim();
+    return raw.length > 0 ? raw : null;
+  } catch {
+    return null;
   }
-  return cookie;
+}
+
+/**
+ * File wins over the environment variable, so refreshing the file is enough
+ * even when a stale value is still exported in the host process.
+ */
+function getAuthCookie(): string {
+  const fromFile = readCookieFile();
+  if (fromFile) return fromFile;
+
+  const fromEnv = process.env.TP_AUTH_COOKIE?.trim();
+  if (fromEnv) return fromEnv;
+
+  throw new Error(
+    `No TrainingPeaks session cookie found. Write the Production_tpAuth cookie value to ${COOKIE_FILE} ` +
+      `(or set TP_AUTH_COOKIE). Get it from DevTools > Application > Cookies on trainingpeaks.com while logged in.`
+  );
 }
 
 export async function getToken(): Promise<string> {
@@ -65,7 +94,9 @@ export async function getToken(): Promise<string> {
   });
 
   if (!response.data.success) {
-    throw new Error("Failed to exchange cookie for Bearer token. The cookie may be expired.");
+    throw new Error(
+      `Failed to exchange cookie for Bearer token — it is probably expired. Replace the value in ${COOKIE_FILE}.`
+    );
   }
 
   cachedToken = {

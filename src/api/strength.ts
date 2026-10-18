@@ -137,6 +137,8 @@ export interface StrengthExerciseSpec {
   id: string; // library exercise ID (e.g. "5178")
   name: string; // display title
   sets_data: StrengthSetSpec[]; // one entry per set; all sets may differ
+  group?: string; // exercises sharing a label become one block (superset/circuit)
+  block_type?: StrengthBlock["blockType"];
 }
 
 // ─── Strength parameter metadata ──────────────────────────────────────────────
@@ -284,67 +286,96 @@ export async function createStrengthWorkout(
   const athleteId = await getAthleteId();
 
   let totalSets = 0;
+  let totalPrescriptions = 0;
 
-  const blocks = exercises.map((ex) => {
-    const paramNames = [...new Set(ex.sets_data.flatMap((s) => Object.keys(s)))];
+  // Exercises sharing a `group` label land in one block. That is how
+  // supersets and circuits are shaped on this API: one block, several
+  // prescriptions. Ungrouped exercises each get their own block, which is
+  // the upstream behaviour.
+  const groups: StrengthExerciseSpec[][] = [];
+  const byLabel = new Map<string, StrengthExerciseSpec[]>();
+  for (const ex of exercises) {
+    if (!ex.group) {
+      groups.push([ex]);
+      continue;
+    }
+    const existing = byLabel.get(ex.group);
+    if (existing) {
+      existing.push(ex);
+    } else {
+      const fresh = [ex];
+      byLabel.set(ex.group, fresh);
+      groups.push(fresh);
+    }
+  }
 
-    const prescriptionParams = paramNames.map((p) => ({
-      parameter: p,
-      title: STRENGTH_PARAM_META[p]?.title ?? p,
-      unit: STRENGTH_PARAM_META[p]?.unit ?? { title: p, abbreviation: "", unit: p },
-      category: STRENGTH_PARAM_META[p]?.category ?? p,
-      id: randomUUID(),
-    }));
+  const blocks = groups.map((group) => {
+    const prescriptions = group.map((ex) => {
+      const paramNames = [...new Set(ex.sets_data.flatMap((s) => Object.keys(s)))];
 
-    const exerciseParams = paramNames.map((p) => ({
-      parameter: p,
-      title: STRENGTH_PARAM_META[p]?.title ?? p,
-      unit: STRENGTH_PARAM_META[p]?.unit ?? { title: p, abbreviation: "", unit: p },
-      category: STRENGTH_PARAM_META[p]?.category ?? p,
-      id: "0",
-    }));
-
-    const sets = ex.sets_data.map((setData) => ({
-      id: randomUUID(),
-      isComplete: false,
-      setOrigin: "Prescribed" as const,
-      parameterValues: Object.entries(setData).map(([param, value]) => ({
+      const prescriptionParams = paramNames.map((p) => ({
+        parameter: p,
+        title: STRENGTH_PARAM_META[p]?.title ?? p,
+        unit: STRENGTH_PARAM_META[p]?.unit ?? { title: p, abbreviation: "", unit: p },
+        category: STRENGTH_PARAM_META[p]?.category ?? p,
         id: randomUUID(),
-        parameter: param,
-        inputFormat: strengthParamInputFormat(param),
-        prescribedValue: value,
-        executedValue: null,
-      })),
-    }));
+      }));
 
-    totalSets += sets.length;
+      const exerciseParams = paramNames.map((p) => ({
+        parameter: p,
+        title: STRENGTH_PARAM_META[p]?.title ?? p,
+        unit: STRENGTH_PARAM_META[p]?.unit ?? { title: p, abbreviation: "", unit: p },
+        category: STRENGTH_PARAM_META[p]?.category ?? p,
+        id: "0",
+      }));
+
+      const sets = ex.sets_data.map((setData) => ({
+        id: randomUUID(),
+        isComplete: false,
+        setOrigin: "Prescribed" as const,
+        parameterValues: Object.entries(setData).map(([param, value]) => ({
+          id: randomUUID(),
+          parameter: param,
+          inputFormat: strengthParamInputFormat(param),
+          prescribedValue: value,
+          executedValue: null,
+        })),
+      }));
+
+      totalSets += sets.length;
+      totalPrescriptions += 1;
+
+      return {
+        id: randomUUID(),
+        exercise: {
+          id: ex.id,
+          title: ex.name,
+          videoUrl: null,
+          instructions: null,
+          parameters: exerciseParams,
+          canEdit: false,
+        },
+        parameters: prescriptionParams,
+        sets,
+        coachNotes: null,
+        compliancePercent: 0,
+        setSummaryTemplate: buildSetSummaryTemplate(paramNames),
+      };
+    });
+
+    const declared = group.find((ex) => ex.block_type)?.block_type;
+    const blockType = (declared ??
+      (prescriptions.length > 1 ? "Circuit" : "SingleExercise")) as StrengthBlock["blockType"];
 
     return {
       id: randomUUID(),
-      blockType: "SingleExercise" as const,
-      title: ex.name,
+      blockType,
+      title: group[0].group ?? group[0].name,
       coachNotes: null,
       isComplete: false,
       compliancePercent: 0,
       parameters: [],
-      prescriptions: [
-        {
-          id: randomUUID(),
-          exercise: {
-            id: ex.id,
-            title: ex.name,
-            videoUrl: null,
-            instructions: null,
-            parameters: exerciseParams,
-            canEdit: false,
-          },
-          parameters: prescriptionParams,
-          sets,
-          coachNotes: null,
-          compliancePercent: 0,
-          setSummaryTemplate: buildSetSummaryTemplate(paramNames),
-        },
-      ],
+      prescriptions,
     };
   });
 
@@ -360,7 +391,7 @@ export async function createStrengthWorkout(
       completedBlocks: 0,
       totalSets,
       completedSets: 0,
-      totalPrescriptions: blocks.length,
+      totalPrescriptions,
       completedPrescriptions: 0,
     },
     prescribedDate: date,
@@ -433,6 +464,20 @@ export function registerStrengthTools(mcp: McpServer): void {
               name: z
                 .string()
                 .describe("Exercise display name (e.g. '90-90', 'Alternating DB Press')"),
+              group: z
+                .string()
+                .optional()
+                .describe(
+                  "Optional block label. Exercises given the same label are placed in ONE block, " +
+                    "which is how supersets and circuits are represented. Omit for a standalone exercise."
+                ),
+              block_type: z
+                .enum(["WarmUp", "SingleExercise", "Superset", "Circuit", "CoolDown"])
+                .optional()
+                .describe(
+                  "Block type for this exercise's block. Defaults to Circuit when a group holds " +
+                    "more than one exercise, SingleExercise otherwise."
+                ),
               sets_data: z
                 .array(z.record(z.string(), z.string()))
                 .describe(
@@ -460,19 +505,26 @@ export function registerStrengthTools(mcp: McpServer): void {
         "Exercises:",
       ];
       for (const block of workout.blocks) {
-        const ex = block.prescriptions[0]?.exercise;
-        const sets = block.prescriptions[0]?.sets ?? [];
-        const template = block.prescriptions[0]?.setSummaryTemplate ?? "";
-        const sample = sets[0]
-          ? template.replace(
-              /\{(\w+)\}/g,
-              (_, p) =>
-                sets[0].parameterValues.find((v) => v.parameter === p)?.prescribedValue ?? "?"
-            )
-          : "";
-        lines.push(
-          `  • ${block.title ?? ex?.title ?? "?"} — ${sets.length} sets ${sample ? `(e.g. ${sample})` : ""}`
-        );
+        if (block.prescriptions.length > 1) {
+          lines.push(`  [${block.blockType}] ${block.title ?? "?"}`);
+        }
+        const indent = block.prescriptions.length > 1 ? "    " : "  ";
+        for (const pres of block.prescriptions) {
+          const sets = pres.sets ?? [];
+          const template = pres.setSummaryTemplate ?? "";
+          const sample = sets[0]
+            ? template.replace(
+                /\{(\w+)\}/g,
+                (_, p) =>
+                  sets[0].parameterValues.find((v) => v.parameter === p)?.prescribedValue ?? "?"
+              )
+            : "";
+          const label =
+            pres.exercise?.title ?? (block.prescriptions.length === 1 ? block.title : null) ?? "?";
+          lines.push(
+            `${indent}• ${label} — ${sets.length} sets ${sample ? `(e.g. ${sample})` : ""}`
+          );
+        }
       }
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
