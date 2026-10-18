@@ -8,6 +8,7 @@ import { registerSettingsTools } from "./api/settings.js";
 import { registerEventTools } from "./api/events.js";
 import { registerLibraryTools } from "./api/library.js";
 import { registerStrengthTools } from "./api/strength.js";
+import { registerExerciseTools } from "./api/exercises.js";
 import { registerMetricTools } from "./api/metrics.js";
 
 const mcp = new McpServer(
@@ -23,6 +24,7 @@ registerSettingsTools(mcp);
 registerEventTools(mcp);
 registerLibraryTools(mcp);
 registerStrengthTools(mcp);
+registerExerciseTools(mcp);
 registerMetricTools(mcp);
 
 export async function main(): Promise<void> {

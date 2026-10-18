@@ -235,7 +235,12 @@ const STRENGTH_PARAM_META: Record<
   RPE: {
     title: "RPE",
     unit: { title: "RPE", abbreviation: "", unit: "RPE" },
-    category: "Effort",
+    category: "RPE",
+  },
+  RIR: {
+    title: "RIR",
+    unit: { title: "RIR", abbreviation: "", unit: "RIR" },
+    category: "RIR",
   },
   Cals: {
     title: "Calories",
@@ -255,7 +260,9 @@ const STRENGTH_PARAM_META: Record<
 };
 
 function strengthParamInputFormat(param: string): "Integer" | "Decimal" {
-  return ["Reps", "RepsPerSide", "Duration", "RPE", "Cals"].includes(param) ? "Integer" : "Decimal";
+  return ["Reps", "RepsPerSide", "Duration", "RPE", "RIR", "Cals"].includes(param)
+    ? "Integer"
+    : "Decimal";
 }
 
 function buildSetSummaryTemplate(params: string[]): string {
@@ -458,8 +465,8 @@ export function registerStrengthTools(mcp: McpServer): void {
               id: z
                 .string()
                 .describe(
-                  "TrainingPeaks library exercise ID (numeric string, e.g. '5178'). " +
-                    "Use known exercise IDs from previous searches or user input."
+                  "TrainingPeaks library exerciseId (numeric string, e.g. '130' for American KB Swing). " +
+                    "Get it from search_strength_exercises — do not guess."
                 ),
               name: z
                 .string()
@@ -482,9 +489,9 @@ export function registerStrengthTools(mcp: McpServer): void {
                 .array(z.record(z.string(), z.string()))
                 .describe(
                   "One object per set. Each key is a parameter name and value is the prescribed amount as a string. " +
-                    "Parameter names: Reps, RepsPerSide, WeightKg, WeightLb, WeightPerSideKg, WeightPerSideLb, WeightPercentage, " +
-                    "Duration (seconds), DistanceMeters, DistanceKm, DistanceFt, DistanceYd, DistanceMiles, " +
-                    "HeightCm, HeightM, HeightIn, HeightFt, RPE, Cals, Watts, VelocityMetersPerSec. " +
+                    "Parameter names the API accepts: Reps, RepsPerSide, WeightKg, WeightLb, WeightPerSideKg, " +
+                    "WeightPerSideLb, Duration (seconds), DistanceMeters, DistanceKm, DistanceFt, DistanceYd, " +
+                    "DistanceMiles, HeightIn, RPE, RIR. Use list_strength_parameters to confirm. " +
                     'Example: [{"Reps": "10"}, {"Reps": "10"}, {"Reps": "10"}] for 3 sets of 10 reps. ' +
                     'Or [{"RepsPerSide": "8", "WeightPerSideKg": "15"}, {"RepsPerSide": "8", "WeightPerSideKg": "20"}] for progressive loading.'
                 ),
