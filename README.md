@@ -430,3 +430,41 @@ npm run format  # auto-format with Prettier
 ## Contributing
 
 Bug reports and pull requests are welcome. When reporting issues, please include the error message returned by the tool (error responses include the full API response body to aid debugging).
+
+---
+
+## Fork notes (rmvangun)
+
+Changes against upstream: a cookie file instead of an env-var-only cookie (with
+a 401 retry, so refreshing auth needs no restart), circuit and superset blocks in
+`create_strength_workout`, and `search_strength_exercises` / `list_muscle_groups`
+/ `list_strength_parameters` built on `GET /rx/activity/v1/libraryContent`.
+
+### Setup
+
+```
+npm ci && npm run build          # run on macOS, not through a Claude bridge
+./scripts/set-cookie.sh          # copy the Production_tpAuth value first
+node scripts/tp-verify.mjs
+# quit the Claude desktop app, THEN:
+./scripts/register-mcp.sh
+# then start the app
+```
+
+### The config gotcha
+
+The desktop app's MCP config lives at
+`~/Library/Application Support/Claude/claude_desktop_config.json`. **The app owns
+that file.** It holds the config in memory and serializes it back on quit, so an
+edit made while the app is running appears to succeed and then reverts, and the
+app spawns the stale path. Symptom: `MODULE_NOT_FOUND` on a path that no longer
+exists, and `state: failed` / "Connection closed" for the server.
+
+Always quit the app before editing. `register-mcp.sh` now refuses to run while it
+is open, and re-reads the file afterward to confirm the write landed.
+
+### Session cookie
+
+`.cookie` is gitignored and worth treating as a password — it grants full account
+access. It expires on logout and after inactivity; re-run `set-cookie.sh` and the
+next tool call picks it up.

@@ -17,6 +17,19 @@ NODE="$(cd "$(dirname "$NODE")" && pwd)/$(basename "$NODE")"
 [ -f "$ENTRY" ] || { echo "Not built yet. Run: npm ci && npm run build" >&2; exit 1; }
 [ -f "$COOKIE" ] || echo "WARNING: no cookie at $COOKIE — run ./scripts/set-cookie.sh before using the server." >&2
 
+# The desktop app owns this config file: it holds the settings in memory and
+# writes them back when it quits, which silently reverts an edit made while it
+# was running. Quit first, edit second, launch third.
+if pgrep -x Claude >/dev/null 2>&1 || pgrep -f "Claude.app/Contents/MacOS/Claude" >/dev/null 2>&1; then
+  cat >&2 <<'MSG'
+The Claude desktop app is running. Quit it first (Cmd+Q) and run this again.
+
+It keeps this config in memory and rewrites the file on quit, so editing now
+would look like it worked and then revert the moment you quit the app.
+MSG
+  exit 1
+fi
+
 echo "node:   $NODE  ($("$NODE" -v))"
 echo "entry:  $ENTRY"
 echo "cookie: $COOKIE"
@@ -72,5 +85,16 @@ if existing:
 PY
 
 echo
-echo "Now quit the Claude desktop app completely (Cmd+Q) and reopen it."
+echo "Verifying the file on disk..."
+ENTRY="$ENTRY" CFG="$CFG" python3 - <<'PY'
+import json, os, sys
+d = json.load(open(os.environ["CFG"]))
+got = d.get("mcpServers", {}).get("trainingpeaks", {}).get("args", [None])[0]
+if got != os.environ["ENTRY"]:
+    sys.exit(f"MISMATCH: the file says {got!r}. Something rewrote it — is the app running?")
+print("  on disk, args[0] is correct")
+PY
+
+echo
+echo "Now START the Claude desktop app (it should be closed right now)."
 echo "Verify with:  python3 -c \"import json;print(sorted(json.load(open('$CFG'))['mcpServers']))\""
